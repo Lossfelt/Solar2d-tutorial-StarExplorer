@@ -10,7 +10,6 @@ local scene = composer.newScene()
 -- -----------------------------------------------------------------------------------
 
 local physics = require("physics")
-physics.setDrawMode( "hybrid" )
 physics.start()
 physics.setGravity( 0, 0 )
 
