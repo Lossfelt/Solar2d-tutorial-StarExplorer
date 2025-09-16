@@ -71,9 +71,15 @@ local explosionSound
 local fireSound
 local musicTrack
 
-local function updateText()
-    livesText.text = "Lives: " .. lives
-    scoreText.text = "Score: " .. score
+local moveLeftHeld, moveRightHeld = false, false
+local moveSpeed = 420 -- px/sek
+local btnLeft, btnRight, btnFire
+local onMoveLeftTouch, onMoveRightTouch, onFireTouch
+local lastTime = 0
+
+-- Sikker sjekk for display-objekter
+local function isValid(obj)
+    return obj ~= nil and obj.removeSelf ~= nil
 end
 
 local asteroidShape = {-21, 38, -49, 6, -33, -44, 22, -43, 49, -2, 33, 30}
@@ -109,6 +115,7 @@ local function createAsteroid()
 end
 
 local function fireLaser()
+    if not isValid(ship) then return end  -- <— guard
     -- Play fire sound!
     audio.play( fireSound )
     local newLaser = display.newImageRect( mainGroup, objectSheet, 5, 14, 40 )
@@ -119,20 +126,6 @@ local function fireLaser()
     newLaser.y = ship.y
     newLaser:toBack()
     transition.to( newLaser, {y=-40, time=500, onComplete = function() display.remove(newLaser) end} )
-end
-
-local function dragShip(event)
-    local ship = event.target
-    local phase = event.phase
-    if ("began"==phase) then
-        display.currentStage:setFocus(ship)
-        ship.touchOffsetX = event.x - ship.x
-    elseif ("moved"==phase) then
-        ship.x = event.x - ship.touchOffsetX
-    elseif ("ended"==phase or "cancelled"==phase) then
-        display.currentStage:setFocus(nil)
-    end
-    return true  -- Prevents touch propagation to underlying objects
 end
 
 local function gameLoop()
@@ -152,7 +145,7 @@ end
 local function restoreShip()
     ship.isBodyActive = false
     ship.x = display.contentCenterX
-    ship.y = display.contentHeight - 100
+    ship.y = display.contentHeight - 220
     -- Fade in ship
     transition.to(ship, {alpha=1, time=4000,
         onComplete = function()
@@ -224,6 +217,7 @@ local function onCollision(event)
                 livesText.text = "Lives: " .. lives
                 if lives==0 then
                     display.remove( ship )
+                    ship = nil
 					timer.performWithDelay( 2000, endGame )
                 else
                     ship.alpha = 0
@@ -232,6 +226,81 @@ local function onCollision(event)
             end
         end
     end
+end
+
+local function onEnterFrame(event)
+    -- Skip om skipet er borte (f.eks. etter at du døde)
+    if not isValid(ship) then return end
+
+    if lastTime == 0 then 
+        lastTime = event.time 
+        return
+    end
+
+    local dt = (event.time - lastTime) / 1000
+    lastTime = event.time
+    if dt > 0.1 then dt = 0.1 end  -- clamp for sikkerhets skyld
+
+    local vx = 0
+    if moveLeftHeld  then vx = vx - moveSpeed end
+    if moveRightHeld then vx = vx + moveSpeed end
+    if vx ~= 0 then
+        ship.x = ship.x + vx * dt
+        local halfW = ship.width * 0.5
+        if ship.x < halfW then ship.x = halfW end
+        local maxX = display.contentWidth - halfW
+        if ship.x > maxX then ship.x = maxX end
+    end
+end
+
+-- Hjelper: lag en “hitbox” rundt ikonene så de er lette å treffe
+local function makeIconButton(parent, filename, x, y, iconW, iconH, hitScale)
+    local g = display.newGroup(); parent:insert(g)
+    local hitW, hitH = iconW * (hitScale or 1.4), iconH * (hitScale or 1.4)
+    local hit = display.newRoundedRect(g, 0, 0, hitW, hitH, 16)
+    hit.isVisible, hit.isHitTestable, hit.alpha = false, true, 0.001
+    local img = display.newImageRect(g, filename, iconW, iconH)
+    g.x, g.y = x, y
+    return g
+end
+
+-- Touch-lyttere (hold for bevegelse, trykk for skudd)
+onMoveLeftTouch = function(event)
+    if event.phase == "began" then
+        display.getCurrentStage():setFocus(event.target, event.id)
+        event.target.isFocus = true
+        moveLeftHeld = true
+    elseif event.target.isFocus and (event.phase == "ended" or event.phase == "cancelled") then
+        moveLeftHeld = false
+        display.getCurrentStage():setFocus(event.target, nil)
+        event.target.isFocus = false
+    end
+    return true
+end
+
+onMoveRightTouch = function(event)
+    if event.phase == "began" then
+        display.getCurrentStage():setFocus(event.target, event.id)
+        event.target.isFocus = true
+        moveRightHeld = true
+    elseif event.target.isFocus and (event.phase == "ended" or event.phase == "cancelled") then
+        moveRightHeld = false
+        display.getCurrentStage():setFocus(event.target, nil)
+        event.target.isFocus = false
+    end
+    return true
+end
+
+onFireTouch = function(event)
+    if event.phase == "began" then
+        display.getCurrentStage():setFocus(event.target, event.id)
+        event.target.isFocus = true
+        if isValid(ship) then fireLaser() end
+    elseif event.target.isFocus and (event.phase == "ended" or event.phase == "cancelled") then
+        display.getCurrentStage():setFocus(event.target, nil)
+        event.target.isFocus = false
+    end
+    return true
 end
 
 -- -----------------------------------------------------------------------------------
@@ -264,7 +333,7 @@ function scene:create( event )
 	-- Display the ship
 	ship = display.newImageRect( mainGroup, objectSheet, 4, 98, 79 )
     ship.x = display.contentCenterX
-    ship.y = display.contentHeight - 100
+    ship.y = display.contentHeight - 220
     physics.addBody( ship, { shape=shipNose, isSensor=true }, {shape=shipBody, isSensor=true} )
     ship.myName = "ship"
  
@@ -272,8 +341,32 @@ function scene:create( event )
     livesText = display.newText( uiGroup, "Lives: " .. lives, 200, 80, native.systemFont, 36 )
     scoreText = display.newText( uiGroup, "Score: " .. score, 400, 80, native.systemFont, 36 )
 
-	ship:addEventListener( "tap", fireLaser )
-    ship:addEventListener( "touch", dragShip )
+   -- Trygge skjermgrenser
+    local safeLeft   = display.safeScreenOriginX
+    local safeRight  = display.safeScreenOriginX + display.safeActualContentWidth
+    local safeBottom = display.safeScreenOriginY + display.safeActualContentHeight
+
+    -- Plassering/str.
+    local pad = 30
+    local iconW, iconH = 80, 80      -- størrelsen på venstre/høyre-ikon
+    local fireW, fireH = 120, 120    -- større skyteknapp
+
+    -- Venstre side (to knapper ved siden av hverandre)
+    local leftX1 = safeLeft + pad + iconW*0.5
+    local leftX2 = leftX1 + iconW + 30
+    local yBtn   = safeBottom - pad - iconH*0.5
+
+    btnLeft  = makeIconButton(uiGroup, "left-arrow-white.png",  leftX1, yBtn, iconW, iconH, 1.6)
+    btnRight = makeIconButton(uiGroup, "right-arrow-white.png", leftX2, yBtn, iconW, iconH, 1.6)
+
+    -- Høyre side (stor FIRE)
+    local fireX = safeRight - pad - fireW*0.5
+    btnFire     = makeIconButton(uiGroup, "target-white.png", fireX, yBtn, fireW, fireH, 1.3)
+
+    -- Lyttere for touch
+    btnLeft:addEventListener( "touch", onMoveLeftTouch )
+    btnRight:addEventListener( "touch", onMoveRightTouch )
+    btnFire:addEventListener( "touch", onFireTouch )
 
     explosionSound = audio.loadSound( "audio/explosion.wav" )
     fireSound = audio.loadSound( "audio/fire.wav" )
@@ -295,6 +388,7 @@ function scene:show( event )
 		physics.start()
         Runtime:addEventListener( "collision", onCollision )
         gameLoopTimer = timer.performWithDelay( 500, gameLoop, 0 )
+        Runtime:addEventListener("enterFrame", onEnterFrame)
         -- Start the music!
         audio.play( musicTrack, { channel=1, loops=-1 } )
     end
@@ -314,6 +408,12 @@ function scene:hide( event )
 		-- Code here runs immediately after the scene goes entirely off screen
 		Runtime:removeEventListener( "collision", onCollision )
         physics.pause()
+        Runtime:removeEventListener("enterFrame", onEnterFrame)
+        lastTime = 0
+        if btnLeft then   btnLeft:removeEventListener( "touch", onMoveLeftTouch )  end
+        if btnRight then  btnRight:removeEventListener( "touch", onMoveRightTouch ) end
+        if btnFire then   btnFire:removeEventListener( "touch", onFireTouch )       end
+-- (kan også display.remove(...) på knappene her hvis du ikke resirkulerer scenen)
 		composer.removeScene( "game" )
         -- Stop the music!
         audio.stop( 1 )

@@ -1,4 +1,7 @@
 local composer = require( "composer" )
+
+-- Aktiver multitouch så vi kan holde inne bevegelse + trykke FIRE samtidig
+system.activate("multitouch")
  
 -- Hide status bar
 display.setStatusBar( display.HiddenStatusBar )
